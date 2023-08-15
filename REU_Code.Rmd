@@ -1,0 +1,150 @@
+---
+title: "REU Conditional Distribution"
+output: html_document
+date: "2023-07-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls(all = TRUE))
+```
+
+
+```{r}
+set.seed(123456)
+
+k <- 100
+
+# creating a zero vector for x
+x <- rep(0, k)
+
+# creating a zero vector for the error term
+epsilon <- rnorm(k, mean = 0, sd = 0.1)
+
+for (i in 1:k) {
+  x[i] <- i/k
+}
+
+# define the response
+y <- (x-0.5)^2 + epsilon
+y.scaled <- scale(y)
+
+# Plot
+plot(x,y, main = "Simulated Data", xlab = "Genotype", ylab = "Quantitative Trait")
+```
+
+
+
+```{r}
+Cond.Dist.f.y <- function(theta = 1, tau.sq = 1) {
+  sigma <- matrix(rep(0, (k*k)), nrow = k, ncol = k)
+  for (i in 1:k) {
+    for (j in 1:k) {
+      sigma[i,j] <- exp(-theta * (i-j)^2)
+    }
+  }
+  # Define A and A^-1
+  A <- sigma + tau.sq*diag(1,nrow=k,ncol=k)
+  A.inv <- solve(A)
+  
+  f.mean <- sigma %*% A.inv %*% y.scaled
+  f.cov <- sigma - (sigma %*% A.inv %*% sigma)
+  f <- dnorm(f.mean, f.cov)
+  
+  plot(x,y.scaled, xlab = "Genotype", ylab = "Quantitative Trait")
+  lines(x,f.mean)
+  
+  alpha <- 0.05
+  Xvals <- seq(0, 1, length.out = 100)
+  
+  lower <- f.mean + qnorm(0.95) * sqrt(diag(f.cov))
+  upper <- f.mean - qnorm(0.95) * sqrt(diag(f.cov))
+  polygon(c(Xvals, rev(Xvals)), c(lower, rev(upper)),
+           col = rgb(0, 0, 1, 0.25), border = NA)
+}
+```
+
+
+Large $\theta$ and small $\tau^2$ case (from the paper):
+```{r}
+Cond.Dist.f.y(theta = 1, tau.sq = 0.1)
+```
+
+
+Small $\theta$ and large $\tau^2$ case: 
+```{r}
+Cond.Dist.f.y(theta = 0.0001, tau.sq = 1)
+```
+
+Both $\theta$ and $\tau^2$ are small case:
+```{r}
+Cond.Dist.f.y(theta = 0.0001, tau.sq = 0.0001)
+```
+
+Both $\theta$ and $\tau^2$ are large case:
+```{r}
+Cond.Dist.f.y(theta = 1, tau.sq = 1)
+```
+
+Both $\theta$ and $\tau^2$ are very large case:
+```{r}
+Cond.Dist.f.y(theta = 100, tau.sq = 100)
+```
+
+When $\theta$ is larger and $\tau^2$ gets closer to zero, the fitted line aligns with all data points on the plot. The lower $\theta$ is and the greater $\tau^2$ is, the less accurate the fitted line is. When both $\theta$ and $\tau^2$ are small ($\theta = \tau^2 = 0.0001$), the curve hits some data points but is much less accurate than when $\theta$ is large and $\tau^2$ is small. When both $\theta$ and $\tau^2$ are large ($\theta = \tau^2 = 1$), the curve hits many data points but appears to lie closer to $y=0$. When both $\theta$ and $\tau^2$ are very large ($\theta = \tau^2 = 100$), the fitted curve does not hit many data points and is essentially a horizontal line on $y=0$. 
+
+When $\theta$ (the smoothing parameter) is small, the fitted line becomes more smooth. 
+
+
+```{r}
+Cond.Dist.f.g.y <- function(theta = 1, tau.sq = 1, constant = 1) {
+  # K is the variance of f and the covariance matrix of f and y
+  # also variance of g when using radial basis function
+  # Radial basis function for the covariance matrix elements: k_{ij} = exp{-theta ||x_i - x_j||^2}
+  K <- matrix(rep(0, (k*k)), nrow = k, ncol = k)
+  for (i in 1:k) {
+    for (j in 1:k) {
+      K[i,j] <- exp(-theta * (x[i]-x[j])^2)
+    }
+  }
+  # Define A and A^-1
+  A <- K + tau.sq*diag(1,nrow=k,ncol=k)
+  A.inv <- solve(A)
+  
+  f.mean <- K %*% A.inv %*% y.scaled
+  
+  # B is the covariance matrix between f and g
+  # B is also the covariance matrix between g and y
+  B <- matrix(rep(0, (k*k)), nrow = k, ncol = k)
+  for (i in 1:k) {
+    for (j in 1:k) {
+      B[i,j] <- exp(-theta * (x[i] - x[j] - constant)^2)
+    }
+  }
+  
+  g.mean <- t(B) %*% A.inv %*% y.scaled
+  
+  plot(x,y.scaled, xlab = "Genotype", ylab = "Quantitative Trait")
+  lines(x,f.mean)
+  lines(x, g.mean, col = "red")
+  
+  legend(0.3, 2.5, legend=c("Conditional mean of f", "Conditional mean of g"), 
+       fill = c("black","red"))
+  
+  # importance of the j-th variable for Gaussian process fit with respect to each sample
+  delta.mean <- (K - t(B)) %*% A.inv %*% y.scaled
+  plot(delta.mean, main = "Variable Importance", ylab = "Delta")
+  
+  # the sample average is the global effect size for the j-th variable within the observed population
+  # in statistical genetics delta will be concentrated around zero if the j-th genetic variant has no effect on the phenotypic variation for a trait. In this case, we only simulated one variable, and because there is a clear pattern in the deltas and the sample average is not zero, we can say the variable is important. 
+  sum(abs(delta.mean))/k
+  
+  # Each delta value in the delta vector refers to the expected change in the corresponding phenotype y_i associated with increasing the variable x by 1/k (which is 1 over k observations) for each individual
+  
+}
+Cond.Dist.f.g.y(theta = 1, tau.sq = 0.001, constant = 1/k)
+```
+
